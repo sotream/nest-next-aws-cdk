@@ -79,6 +79,15 @@ describe('GitHub deploy roles', () => {
   });
 });
 
+describe('outputs', () => {
+  it('publishes the role ARNs for the GitHub variables', () => {
+    const t = synth();
+    for (const name of ['DeployRoleArnDev', 'DeployRoleArnProd', 'PreviewRoleArn']) {
+      expect(t.findOutputs(name)).not.toEqual({});
+    }
+  });
+});
+
 describe('preview role', () => {
   const t = synth();
   const preview = Object.values(t.findResources('AWS::IAM::Role')).find(
