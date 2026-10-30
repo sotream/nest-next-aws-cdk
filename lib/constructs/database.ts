@@ -3,6 +3,7 @@ import {
   Fn,
   RemovalPolicy,
   SecretValue,
+  Validations,
   aws_ec2 as ec2,
   aws_rds as rds,
   aws_secretsmanager as sm,
@@ -15,12 +16,17 @@ export interface DatabaseProps {
   credentials: sm.ISecret;
   /** RDS instance class, e.g. `db.t4g.micro`. */
   instanceClass: string;
+  /** Multi-AZ standby. */
+  highAvailability: boolean;
   /** Backups and deletion protection. Off for previews, which are destroyed with their stack. */
   backups: boolean;
   destroyOnDelete: boolean;
 }
 
 const DATABASE_NAME = 'app';
+
+export const SECRET_ROTATION_REASON =
+  'Derived from another secret by a dynamic reference; rotating it means rotating the credentials it is built from, which is manual for now (see the runbook).';
 
 /** Private, encrypted PostgreSQL. Connections must use TLS (`rds.force_ssl`). */
 export class Database extends Construct {
@@ -42,11 +48,34 @@ export class Database extends Construct {
       allocatedStorage: 20,
       storageType: rds.StorageType.GP3,
       storageEncrypted: true,
+      multiAz: props.highAvailability,
       parameters: { 'rds.force_ssl': '1' },
       backupRetention: props.backups ? Duration.days(7) : Duration.days(0),
       deletionProtection: props.backups,
       removalPolicy: props.destroyOnDelete ? RemovalPolicy.DESTROY : RemovalPolicy.SNAPSHOT,
     });
+
+    Validations.of(this.instance).acknowledge({
+      id: 'AwsSolutions-RDS11',
+      reason:
+        'The default port is kept: only the API and migration security groups can reach the database, so a custom port adds little.',
+    });
+    if (!props.highAvailability) {
+      Validations.of(this.instance).acknowledge({
+        id: 'AwsSolutions-RDS3',
+        reason: 'Single-AZ in dev and previews to keep them cheap; stage and prod are multi-AZ.',
+      });
+    }
+    if (!props.backups) {
+      Validations.of(this.instance).acknowledge({
+        id: 'AwsSolutions-RDS10',
+        reason: 'Previews are disposable and are destroyed with their pull request.',
+      });
+      Validations.of(this.instance).acknowledge({
+        id: 'AwsSolutions-RDS13',
+        reason: 'Previews hold no data worth restoring; they get no seeded data and no backups.',
+      });
+    }
 
     // The password is a CloudFormation dynamic reference resolved at deploy time, so the template
     // holds the reference and never the value. sslmode=no-verify encrypts without checking the RDS
@@ -69,6 +98,10 @@ export class Database extends Construct {
           `/${DATABASE_NAME}?sslmode=no-verify`,
         ]),
       ),
+    });
+    Validations.of(this.url).acknowledge({
+      id: 'AwsSolutions-SMG4',
+      reason: SECRET_ROTATION_REASON,
     });
   }
 

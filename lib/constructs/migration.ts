@@ -1,5 +1,6 @@
 import { RemovalPolicy, aws_ec2 as ec2, aws_ecs as ecs, aws_logs as logs } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import { acknowledgeTaskDefinition } from '../nag';
 
 export interface MigrationTaskProps {
   vpc: ec2.IVpc;
@@ -52,5 +53,6 @@ export class MigrationTask extends Construct {
         }),
       }),
     });
+    acknowledgeTaskDefinition(this.taskDefinition);
   }
 }

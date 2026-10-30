@@ -1,5 +1,6 @@
 import {
   Duration,
+  Validations,
   aws_certificatemanager as acm,
   aws_ec2 as ec2,
   aws_elasticloadbalancingv2 as elbv2,
@@ -34,6 +35,16 @@ export class Alb extends Construct {
       internetFacing: true,
       dropInvalidHeaderFields: true,
       idleTimeout: Duration.seconds(60),
+    });
+    Validations.of(this.loadBalancer).acknowledge({
+      id: 'AwsSolutions-EC23',
+      reason:
+        'The load balancer is the public entry point and has to accept HTTP and HTTPS from anywhere.',
+    });
+    Validations.of(this.loadBalancer).acknowledge({
+      id: 'AwsSolutions-ELB2',
+      reason:
+        'Access logs need an S3 bucket with its own policy and lifecycle; not in scope. ALB metrics, alarms and application logs exist.',
     });
     const notFound = elbv2.ListenerAction.fixedResponse(404, {
       contentType: 'text/plain',

@@ -7,6 +7,7 @@ import {
   aws_logs as logs,
 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import { acknowledgeTaskDefinition } from '../nag';
 
 export interface ServiceRoute {
   listener: elbv2.IApplicationListener;
@@ -67,6 +68,8 @@ export class Service extends Construct {
         startPeriod: Duration.seconds(30),
       },
     });
+
+    acknowledgeTaskDefinition(this.taskDefinition);
 
     this.service = new ecs.FargateService(this, 'Service', {
       cluster: props.cluster,

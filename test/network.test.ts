@@ -7,7 +7,7 @@ const synth = (natGateways: number) => {
   const stack = new Stack(new App(), 'Test', {
     env: { account: '111111111111', region: 'eu-central-1' },
   });
-  new Network(stack, 'Network', { natGateways });
+  new Network(stack, 'Network', { natGateways, logRetentionDays: 3, destroyOnDelete: true });
   return Template.fromStack(stack);
 };
 

@@ -1,4 +1,5 @@
 import { App } from 'aws-cdk-lib';
+import { enableNag } from '../lib/nag';
 import { resolveEnv } from '../lib/config';
 import { SharedStack } from '../lib/stacks/shared-stack';
 import { EnvStack } from '../lib/stacks/env-stack';
@@ -10,6 +11,7 @@ function requireEnv(name: string): string {
 }
 
 const app = new App();
+enableNag(app);
 new SharedStack(app, 'nest-next-shared', {
   githubRepository: process.env.GITHUB_REPOSITORY ?? 'sotream/nest-next-aws-cdk',
   environments: ['dev', 'stage', 'prod'],
