@@ -66,12 +66,14 @@ jobs:
           DOMAIN_NAME: ${{ vars[format('DOMAIN_NAME_{0}', inputs.environment)] }}
           HOSTED_ZONE_ID: ${{ vars[format('HOSTED_ZONE_ID_{0}', inputs.environment)] }}
           HOSTED_ZONE_NAME: ${{ vars[format('HOSTED_ZONE_NAME_{0}', inputs.environment)] }}
+          ALARM_EMAIL: ${{ vars[format('ALARM_EMAIL_{0}', inputs.environment)] }}
         run: |
           suffix=$(tr '[:lower:]' '[:upper:]' <<<"$ENVIRONMENT")
           {
             echo "DOMAIN_NAME_$suffix=$DOMAIN_NAME"
             echo "HOSTED_ZONE_ID_$suffix=$HOSTED_ZONE_ID"
             echo "HOSTED_ZONE_NAME_$suffix=$HOSTED_ZONE_NAME"
+            echo "ALARM_EMAIL_$suffix=$ALARM_EMAIL"
           } >> "$GITHUB_ENV"
 
       # Services keep the image they run now; on the first deployment that is none and they start empty.
