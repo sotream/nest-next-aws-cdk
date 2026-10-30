@@ -9,6 +9,7 @@ import {
 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { EnvConfig } from '../config';
+import { Alarms } from '../constructs/alarms';
 import { Alb, Domain } from '../constructs/alb';
 import { Cache } from '../constructs/cache';
 import { Database } from '../constructs/database';
@@ -22,6 +23,8 @@ export interface EnvStackProps extends StackProps {
   envName: string;
   config: EnvConfig;
   domain?: Domain;
+  /** Alarm recipient. */
+  alarmEmail?: string;
   /** Image tag the services run. Without one the services start with zero tasks. */
   imageTag?: string;
   /** Image tag of the migration task. Defaults to `imageTag`. */
@@ -39,6 +42,7 @@ export class EnvStack extends Stack {
   public readonly api: Service;
   public readonly web: Service;
   public readonly migration: MigrationTask;
+  public readonly alarms: Alarms;
   /** Environment and secrets of the API; the migration task needs the same, the starter validates all of it. */
   public readonly apiEnvironment: Record<string, string>;
   public readonly apiSecrets: Record<string, ecs.Secret>;
@@ -99,10 +103,11 @@ export class EnvStack extends Stack {
     };
     const image = (name: keyof typeof repository, imageTag = tag) =>
       ecs.ContainerImage.fromEcrRepository(repository[name], imageTag);
+    // No image yet (first deployment): create the services empty, the deploy workflow rolls them out.
+    const desiredCount = props.imageTag ? config.desiredCount : 0;
     const common = {
       cluster: this.cluster,
-      // No image yet (first deployment): create the services empty, the deploy workflow rolls them out.
-      desiredCount: props.imageTag ? config.desiredCount : 0,
+      desiredCount,
       logRetentionDays: config.logRetentionDays,
       destroyOnDelete: config.destroyOnDelete,
     };
@@ -149,6 +154,17 @@ export class EnvStack extends Stack {
     this.database.connections.allowDefaultPortFrom(this.migration.securityGroup);
     this.database.connections.allowDefaultPortFrom(this.api.service);
     this.cache.connections.allowDefaultPortFrom(this.api.service);
+
+    this.alarms = new Alarms(this, 'Alarms', {
+      cluster: this.cluster,
+      loadBalancer: this.alb.loadBalancer,
+      services: [
+        { name: 'Api', service: this.api.service, expectedTasks: desiredCount },
+        { name: 'Web', service: this.web.service, expectedTasks: desiredCount },
+      ],
+      database: this.database.instance,
+      email: props.alarmEmail,
+    });
 
     // Read by the deploy workflow to build images, run the migration and smoke-test.
     new CfnOutput(this, 'Origin', { value: this.alb.origin });

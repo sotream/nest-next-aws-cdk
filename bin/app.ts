@@ -36,6 +36,7 @@ for (const name of names) {
     config,
     stackName,
     domain,
+    alarmEmail: process.env[`ALARM_EMAIL_${suffix}`] || undefined,
     imageTag: app.node.tryGetContext('imageTag') || undefined,
     migrateImageTag: app.node.tryGetContext('migrateImageTag') || undefined,
   });
