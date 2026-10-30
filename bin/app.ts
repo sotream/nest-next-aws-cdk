@@ -10,7 +10,11 @@ function requireEnv(name: string): string {
 }
 
 const app = new App();
-new SharedStack(app, 'nest-next-shared');
+new SharedStack(app, 'nest-next-shared', {
+  githubRepository: process.env.GITHUB_REPOSITORY ?? 'sotream/nest-next-aws-cdk',
+  environments: ['dev', 'stage', 'prod'],
+  oidcProviderArn: process.env.GITHUB_OIDC_PROVIDER_ARN || undefined,
+});
 
 const names = app.node.tryGetContext('env')
   ? [String(app.node.tryGetContext('env'))]
@@ -32,6 +36,7 @@ for (const name of names) {
     config,
     stackName,
     domain,
-    imageTag: app.node.tryGetContext('imageTag'),
+    imageTag: app.node.tryGetContext('imageTag') || undefined,
+    migrateImageTag: app.node.tryGetContext('migrateImageTag') || undefined,
   });
 }

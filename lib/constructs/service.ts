@@ -18,6 +18,8 @@ export interface ServiceRoute {
 
 export interface ServiceProps {
   cluster: ecs.ICluster;
+  /** Fixed so the deploy workflow can ask ECS which image runs now. */
+  serviceName: string;
   image: ecs.ContainerImage;
   port: number;
   desiredCount: number;
@@ -68,6 +70,7 @@ export class Service extends Construct {
 
     this.service = new ecs.FargateService(this, 'Service', {
       cluster: props.cluster,
+      serviceName: props.serviceName,
       taskDefinition: this.taskDefinition,
       desiredCount: props.desiredCount,
       circuitBreaker: { rollback: true },

@@ -1,0 +1,150 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy
+        type: choice
+        options: [dev, stage, prod]
+        required: true
+      starter_ref:
+        description: Full commit SHA of sotream/nest-next-starter to build and deploy
+        type: string
+        required: true
+      allow_db_replacement:
+        description: Let this deploy replace or delete the database
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # The GitHub Environment holds AWS_DEPLOY_ROLE_ARN and, for stage and prod, the required reviewers.
+    environment: ${{ inputs.environment }}
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      STACK: nest-next-${{ inputs.environment }}
+      STARTER_REF: ${{ inputs.starter_ref }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+      ALLOW_DB_REPLACEMENT: ${{ inputs.allow_db_replacement }}
+    steps:
+      - name: Validate the starter ref
+        run: |
+          if ! [[ "$STARTER_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::starter_ref must be a full 40-character commit SHA, not a branch or tag name."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # The domain variables carry the environment in their name; the app reads DOMAIN_NAME_<ENV> and friends.
+      - name: Domain settings
+        env:
+          DOMAIN_NAME: ${{ vars[format('DOMAIN_NAME_{0}', inputs.environment)] }}
+          HOSTED_ZONE_ID: ${{ vars[format('HOSTED_ZONE_ID_{0}', inputs.environment)] }}
+          HOSTED_ZONE_NAME: ${{ vars[format('HOSTED_ZONE_NAME_{0}', inputs.environment)] }}
+        run: |
+          suffix=$(tr '[:lower:]' '[:upper:]' <<<"$ENVIRONMENT")
+          {
+            echo "DOMAIN_NAME_$suffix=$DOMAIN_NAME"
+            echo "HOSTED_ZONE_ID_$suffix=$HOSTED_ZONE_ID"
+            echo "HOSTED_ZONE_NAME_$suffix=$HOSTED_ZONE_NAME"
+          } >> "$GITHUB_ENV"
+
+      # Services keep the image they run now; on the first deployment that is none and they start empty.
+      - name: Current image tag
+        run: |
+          current=$(scripts/current-image-tag.sh "$STACK" "$STACK-api")
+          echo "CURRENT=$current" >> "$GITHUB_ENV"
+          echo "Running now: ${current:-nothing}"
+
+      - name: Diff
+        run: |
+          set -euo pipefail
+          pnpm exec cdk diff "$STACK" --no-color -c "imageTag=$CURRENT" -c "migrateImageTag=$CURRENT" > diff.txt 2>&1 || true
+          {
+            echo '### cdk diff'
+            echo '```'
+            cat diff.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          scripts/check-db-replacement.sh < diff.txt
+
+      # 1. Infrastructure. Services stay on the image they run now.
+      - name: Deploy infrastructure
+        run: |
+          pnpm exec cdk deploy "$STACK" --require-approval never --outputs-file outputs.json \
+            -c "imageTag=$CURRENT" -c "migrateImageTag=$CURRENT"
+          echo "ORIGIN=$(jq -r --arg s "$STACK" '.[$s].Origin' outputs.json)" >> "$GITHUB_ENV"
+
+      # 2. Build from the pinned starter commit. Tags are immutable, so an existing tag is reused.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          repository: sotream/nest-next-starter
+          ref: ${{ inputs.starter_ref }}
+          path: starter
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - name: Build and push images
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          # The web image inlines the origin at build time and tags are immutable, so the tag includes a
+          # hash of the origin: the same commit under a new domain builds a new image.
+          tag="${STARTER_REF::12}-$(printf %s "$ORIGIN" | sha256sum | cut -c1-8)"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          exists() { aws ecr describe-images --repository-name "$1" --image-ids "imageTag=$tag" >/dev/null 2>&1; }
+          if exists nest-next/api; then echo "api:$tag already in ECR"; else
+            docker build -f starter/apps/api/Dockerfile -t "$REGISTRY/nest-next/api:$tag" starter
+            docker push "$REGISTRY/nest-next/api:$tag"
+          fi
+          if exists nest-next/web; then echo "web:$tag already in ECR"; else
+            docker build -f starter/apps/web/Dockerfile --build-arg "NEXT_PUBLIC_API_URL=$ORIGIN" \
+              -t "$REGISTRY/nest-next/web:$tag" starter
+            docker push "$REGISTRY/nest-next/web:$tag"
+          fi
+
+      # 3. Register the migration task for the new image, run it once and require a clean exit.
+      - name: Migrate
+        run: |
+          set -euo pipefail
+          pnpm exec cdk deploy "$STACK" --require-approval never --outputs-file outputs.json \
+            -c "imageTag=$CURRENT" -c "migrateImageTag=$TAG"
+          out() { jq -r --arg s "$STACK" --arg k "$1" '.[$s][$k]' outputs.json; }
+          scripts/run-migration.sh "$(out ClusterName)" "$(out MigrationTaskDefinition)" \
+            "$(out PrivateSubnets)" "$(out MigrationSecurityGroup)"
+
+      # 4. Roll the services. The deploy waits for a steady state; the circuit breaker rolls back a bad rollout.
+      - name: Roll out services
+        run: pnpm exec cdk deploy "$STACK" --require-approval never -c "imageTag=$TAG"
+
+      # 5. Smoke test through the public origin.
+      - name: Smoke test
+        run: scripts/smoke-test.sh "$ORIGIN"

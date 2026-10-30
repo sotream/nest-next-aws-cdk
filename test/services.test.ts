@@ -37,15 +37,16 @@ describe('services', () => {
     });
   });
 
-  it('gives every container a health check and logs with the profile retention', () => {
-    t.allResourcesProperties('AWS::ECS::TaskDefinition', {
-      ContainerDefinitions: [
-        Match.objectLike({
-          HealthCheck: Match.objectLike({ Command: Match.arrayWith(['CMD', 'node', '-e']) }),
-          LogConfiguration: Match.objectLike({ LogDriver: 'awslogs' }),
-        }),
-      ],
-    });
+  it('gives every service container a health check and logs with the profile retention', () => {
+    const services = Object.values(t.findResources('AWS::ECS::TaskDefinition')).filter(
+      (r) => r.Properties.ContainerDefinitions[0].Name === 'app',
+    );
+    expect(services).toHaveLength(2);
+    for (const { Properties } of services) {
+      const [container] = Properties.ContainerDefinitions;
+      expect(container.HealthCheck.Command.slice(0, 3)).toEqual(['CMD', 'node', '-e']);
+      expect(container.LogConfiguration.LogDriver).toBe('awslogs');
+    }
     t.hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 30 });
     synth('pr-9').template.hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 3 });
   });
@@ -89,7 +90,7 @@ describe('services', () => {
     ]);
   });
 
-  it('lets only the API reach the database and cache', () => {
+  it('lets only the API and the migration task reach the database, and only the API the cache', () => {
     const ingress = Object.values(t.findResources('AWS::EC2::SecurityGroupIngress')).map(
       (r) => r.Properties,
     );
@@ -97,11 +98,13 @@ describe('services', () => {
       ingress
         .filter((i) => JSON.stringify(i.GroupId).includes(group))
         .map((i) => JSON.stringify(i.SourceSecurityGroupId));
-    for (const group of ['DatabaseInstanceSecurityGroup', 'CacheSecurityGroup']) {
-      const sources = sourcesInto(group);
-      expect(sources).toHaveLength(1);
-      expect(sources[0]).toContain('ApiServiceSecurityGroup');
-    }
+    const db = sourcesInto('DatabaseInstanceSecurityGroup');
+    expect(db).toHaveLength(2);
+    expect(db.join()).toContain('ApiServiceSecurityGroup');
+    expect(db.join()).toContain('MigrationSecurityGroup');
+    const cache = sourcesInto('CacheSecurityGroup');
+    expect(cache).toHaveLength(1);
+    expect(cache[0]).toContain('ApiServiceSecurityGroup');
   });
 });
 
