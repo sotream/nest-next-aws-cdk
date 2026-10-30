@@ -8,6 +8,8 @@ export interface EnvConfig {
   dbInstanceClass: string;
   cacheNodeType: string;
   logRetentionDays: number;
+  /** Multi-AZ database and a Redis replica with failover. */
+  highAvailability: boolean;
   /** Backups and deletion protection for the database. */
   backups: boolean;
   /** Only previews may be destroyed with their stack. */
@@ -23,6 +25,7 @@ export const configs: Record<EnvName, EnvConfig> = {
     dbInstanceClass: 'db.t4g.micro',
     cacheNodeType: 'cache.t4g.micro',
     logRetentionDays: 7,
+    highAvailability: false,
     backups: true,
     destroyOnDelete: false,
   },
@@ -32,6 +35,7 @@ export const configs: Record<EnvName, EnvConfig> = {
     dbInstanceClass: 'db.t4g.small',
     cacheNodeType: 'cache.t4g.small',
     logRetentionDays: 14,
+    highAvailability: true,
     backups: true,
     destroyOnDelete: false,
   },
@@ -41,6 +45,7 @@ export const configs: Record<EnvName, EnvConfig> = {
     dbInstanceClass: 'db.t4g.medium',
     cacheNodeType: 'cache.t4g.medium',
     logRetentionDays: 30,
+    highAvailability: true,
     backups: true,
     destroyOnDelete: false,
   },
@@ -50,6 +55,7 @@ export const configs: Record<EnvName, EnvConfig> = {
     dbInstanceClass: 'db.t4g.micro',
     cacheNodeType: 'cache.t4g.micro',
     logRetentionDays: 3,
+    highAvailability: false,
     backups: false,
     destroyOnDelete: true,
   },

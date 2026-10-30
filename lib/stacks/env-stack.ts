@@ -50,7 +50,11 @@ export class EnvStack extends Stack {
   constructor(scope: Construct, id: string, props: EnvStackProps) {
     super(scope, id, props);
     Tags.of(this).add('env', props.envName);
-    this.network = new Network(this, 'Network', { natGateways: props.config.natGateways });
+    this.network = new Network(this, 'Network', {
+      natGateways: props.config.natGateways,
+      logRetentionDays: props.config.logRetentionDays,
+      destroyOnDelete: props.config.destroyOnDelete,
+    });
     this.secrets = new Secrets(this, 'Secrets', { destroyOnDelete: props.config.destroyOnDelete });
     const { config } = props;
     this.database = new Database(this, 'Database', {
@@ -58,13 +62,14 @@ export class EnvStack extends Stack {
       credentials: this.secrets.database,
       instanceClass: config.dbInstanceClass,
       backups: config.backups,
+      highAvailability: config.highAvailability,
       destroyOnDelete: config.destroyOnDelete,
     });
     this.cache = new Cache(this, 'Cache', {
       vpc: this.network.vpc,
       authToken: this.secrets.redisAuthToken,
       nodeType: config.cacheNodeType,
-      highAvailability: config.backups,
+      highAvailability: config.highAvailability,
       destroyOnDelete: config.destroyOnDelete,
     });
 

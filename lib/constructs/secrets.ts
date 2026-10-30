@@ -1,4 +1,4 @@
-import { RemovalPolicy, aws_secretsmanager as sm } from 'aws-cdk-lib';
+import { RemovalPolicy, Validations, aws_secretsmanager as sm } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
 export interface SecretsProps {
@@ -39,10 +39,19 @@ export class Secrets extends Construct {
       generateSecretString: { passwordLength: 48, excludePunctuation: true },
     });
 
+    const generated = (secret: sm.Secret) =>
+      Validations.of(secret).acknowledge({
+        id: 'AwsSolutions-SMG4',
+        reason:
+          'Generated once. Rotation needs the API to restart (secrets are read at task start) and, for the database, a coordinated password change; it is manual for now (see the runbook).',
+      });
+
     this.jwt = new sm.Secret(this, 'Jwt', {
       description: 'JWT signing key',
       removalPolicy,
       generateSecretString: { passwordLength: 64, excludePunctuation: true },
     });
+
+    [this.database, this.redisAuthToken, this.jwt].forEach(generated);
   }
 }

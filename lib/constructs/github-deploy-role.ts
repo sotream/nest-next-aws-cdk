@@ -1,4 +1,4 @@
-import { ArnFormat, Stack, aws_ecr as ecr, aws_iam as iam } from 'aws-cdk-lib';
+import { ArnFormat, Stack, Validations, aws_ecr as ecr, aws_iam as iam } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
 export interface GitHubDeployRoleProps {
@@ -47,6 +47,30 @@ export class GitHubDeployRole extends Construct {
         },
       }),
     });
+
+    // cdk-nag reports each wildcard separately, with account, region and partition as placeholders.
+    const partitionArn = 'arn:<AWS::Partition>';
+    const wildcards: Record<string, string> = {
+      '*': 'ecr:GetAuthorizationToken, ecs:DescribeTaskDefinition and cloudformation:ListStacks do not support resource-level permissions; all three are read-only or only return a login token.',
+      [`${partitionArn}:iam::<AWS::AccountId>:role/cdk-${qualifier}-*-role-<AWS::AccountId>-<AWS::Region>`]:
+        'The CDK bootstrap roles (deploy, file and image publishing, lookup) differ only in the middle part of the name.',
+      [`${partitionArn}:cloudformation:<AWS::Region>:<AWS::AccountId>:stack/${prefix}/*`]:
+        'Stack ARNs end in a generated id; the prefix limits this to the stacks of this role.',
+      [`${partitionArn}:ecs:<AWS::Region>:<AWS::AccountId>:service/${prefix}/*`]:
+        'Service names are fixed per cluster; the cluster name limits this to this role.',
+      [`${partitionArn}:ecs:<AWS::Region>:<AWS::AccountId>:task-definition/${prefix}-migrate:*`]:
+        'Task definition ARNs end in a revision number.',
+      [`${partitionArn}:ecs:<AWS::Region>:<AWS::AccountId>:task/${prefix}/*`]:
+        'Task ARNs end in a generated id; the cluster name limits this to this role.',
+      [`${partitionArn}:iam::<AWS::AccountId>:role/${prefix}-*`]:
+        'CDK generates the task role names after the stack name; PassRole is limited to ecs-tasks.amazonaws.com.',
+    };
+    for (const [resource, reason] of Object.entries(wildcards)) {
+      Validations.of(this.role).acknowledge({
+        id: `AwsSolutions-IAM5[Resource::${resource}]`,
+        reason,
+      });
+    }
 
     for (const repository of props.repositories) repository.grantPullPush(this.role);
 

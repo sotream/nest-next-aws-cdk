@@ -2,11 +2,13 @@ import {
   Fn,
   RemovalPolicy,
   SecretValue,
+  Validations,
   aws_ec2 as ec2,
   aws_elasticache as elasticache,
   aws_secretsmanager as sm,
 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import { SECRET_ROTATION_REASON } from './database';
 
 export interface CacheProps {
   vpc: ec2.IVpc;
@@ -63,6 +65,19 @@ export class Cache extends Construct {
     });
     redis.applyRemovalPolicy(props.destroyOnDelete ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN);
 
+    Validations.of(redis).acknowledge({
+      id: 'AwsSolutions-AEC5',
+      reason:
+        'The default port is kept: the security group admits only the API, and the connection needs TLS and AUTH.',
+    });
+    if (!props.highAvailability) {
+      Validations.of(redis).acknowledge({
+        id: 'AwsSolutions-AEC4',
+        reason:
+          'A single node in dev and previews to keep them cheap; stage and prod have a replica with failover.',
+      });
+    }
+
     this.url = new sm.Secret(this, 'Url', {
       description: 'REDIS_URL',
       removalPolicy: props.destroyOnDelete ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
@@ -75,6 +90,10 @@ export class Cache extends Construct {
           `:${PORT}`,
         ]),
       ),
+    });
+    Validations.of(this.url).acknowledge({
+      id: 'AwsSolutions-SMG4',
+      reason: SECRET_ROTATION_REASON,
     });
   }
 }

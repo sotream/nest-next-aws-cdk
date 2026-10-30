@@ -8,20 +8,25 @@ import { Secrets } from '../lib/constructs/secrets';
 
 const synth = (c: EnvConfig) => {
   const stack = new Stack(new App(), 'Test');
-  const { vpc } = new Network(stack, 'Network', { natGateways: c.natGateways });
+  const { vpc } = new Network(stack, 'Network', {
+    natGateways: c.natGateways,
+    logRetentionDays: c.logRetentionDays,
+    destroyOnDelete: c.destroyOnDelete,
+  });
   const secrets = new Secrets(stack, 'Secrets', { destroyOnDelete: c.destroyOnDelete });
   new Database(stack, 'Database', {
     vpc,
     credentials: secrets.database,
     instanceClass: c.dbInstanceClass,
     backups: c.backups,
+    highAvailability: c.highAvailability,
     destroyOnDelete: c.destroyOnDelete,
   });
   new Cache(stack, 'Cache', {
     vpc,
     authToken: secrets.redisAuthToken,
     nodeType: c.cacheNodeType,
-    highAvailability: c.backups,
+    highAvailability: c.highAvailability,
     destroyOnDelete: c.destroyOnDelete,
   });
   return Template.fromStack(stack);

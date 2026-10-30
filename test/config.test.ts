@@ -12,6 +12,12 @@ describe('config profiles', () => {
     }
   });
 
+  it('runs highly available only in stage and prod', () => {
+    for (const [name, c] of Object.entries(configs)) {
+      expect(c.highAvailability).toBe(name === 'stage' || name === 'prod');
+    }
+  });
+
   it('keeps previews cheap', () => {
     expect(configs.preview.natGateways).toBe(1);
     expect(configs.preview.desiredCount).toBe(1);
