@@ -1,10 +1,19 @@
-import { Annotations, Stack, StackProps, Tags, aws_ecr as ecr, aws_ecs as ecs } from 'aws-cdk-lib';
+import {
+  Annotations,
+  CfnOutput,
+  Stack,
+  StackProps,
+  Tags,
+  aws_ecr as ecr,
+  aws_ecs as ecs,
+} from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { EnvConfig } from '../config';
 import { Alb, Domain } from '../constructs/alb';
 import { Cache } from '../constructs/cache';
 import { Database } from '../constructs/database';
 import { REPOSITORY_NAMES } from '../constructs/ecr';
+import { MigrationTask } from '../constructs/migration';
 import { Network } from '../constructs/network';
 import { Secrets } from '../constructs/secrets';
 import { Service, httpHealthScript } from '../constructs/service';
@@ -13,8 +22,10 @@ export interface EnvStackProps extends StackProps {
   envName: string;
   config: EnvConfig;
   domain?: Domain;
-  /** Image tag of the pinned starter commit that CI pushed. */
+  /** Image tag the services run. Without one the services start with zero tasks. */
   imageTag?: string;
+  /** Image tag of the migration task. Defaults to `imageTag`. */
+  migrateImageTag?: string;
 }
 
 /** One environment: composes the constructs. */
@@ -27,6 +38,7 @@ export class EnvStack extends Stack {
   public readonly cluster: ecs.Cluster;
   public readonly api: Service;
   public readonly web: Service;
+  public readonly migration: MigrationTask;
   /** Environment and secrets of the API; the migration task needs the same, the starter validates all of it. */
   public readonly apiEnvironment: Record<string, string>;
   public readonly apiSecrets: Record<string, ecs.Secret>;
@@ -54,6 +66,7 @@ export class EnvStack extends Stack {
 
     this.alb = new Alb(this, 'Alb', { vpc: this.network.vpc, domain: props.domain });
     this.cluster = new ecs.Cluster(this, 'Cluster', {
+      clusterName: this.stackName,
       vpc: this.network.vpc,
       containerInsightsV2: ecs.ContainerInsights.ENABLED,
     });
@@ -78,21 +91,25 @@ export class EnvStack extends Stack {
       JWT_ACCESS_SECRET: ecs.Secret.fromSecretsManager(this.secrets.jwt),
     };
 
-    const tag = props.imageTag ?? 'unset';
-    const image = (name: keyof typeof REPOSITORY_NAMES) =>
-      ecs.ContainerImage.fromEcrRepository(
-        ecr.Repository.fromRepositoryName(this, `${name}Repo`, REPOSITORY_NAMES[name]),
-        tag,
-      );
+    const tag = props.imageTag ?? 'pending';
+    const migrateTag = props.migrateImageTag ?? tag;
+    const repository = {
+      api: ecr.Repository.fromRepositoryName(this, 'ApiRepo', REPOSITORY_NAMES.api),
+      web: ecr.Repository.fromRepositoryName(this, 'WebRepo', REPOSITORY_NAMES.web),
+    };
+    const image = (name: keyof typeof repository, imageTag = tag) =>
+      ecs.ContainerImage.fromEcrRepository(repository[name], imageTag);
     const common = {
       cluster: this.cluster,
-      desiredCount: config.desiredCount,
+      // No image yet (first deployment): create the services empty, the deploy workflow rolls them out.
+      desiredCount: props.imageTag ? config.desiredCount : 0,
       logRetentionDays: config.logRetentionDays,
       destroyOnDelete: config.destroyOnDelete,
     };
 
     this.api = new Service(this, 'Api', {
       ...common,
+      serviceName: `${this.stackName}-api`,
       image: image('api'),
       port: 4000,
       environment: this.apiEnvironment,
@@ -107,6 +124,7 @@ export class EnvStack extends Stack {
     });
     this.web = new Service(this, 'Web', {
       ...common,
+      serviceName: `${this.stackName}-web`,
       image: image('web'),
       port: 3000,
       healthScript: httpHealthScript(3000, '/sign-in'),
@@ -118,7 +136,29 @@ export class EnvStack extends Stack {
       },
     });
 
+    this.migration = new MigrationTask(this, 'Migration', {
+      vpc: this.network.vpc,
+      family: `${this.stackName}-migrate`,
+      image: image('api', migrateTag),
+      environment: this.apiEnvironment,
+      secrets: this.apiSecrets,
+      logRetentionDays: config.logRetentionDays,
+      destroyOnDelete: config.destroyOnDelete,
+    });
+
+    this.database.connections.allowDefaultPortFrom(this.migration.securityGroup);
     this.database.connections.allowDefaultPortFrom(this.api.service);
     this.cache.connections.allowDefaultPortFrom(this.api.service);
+
+    // Read by the deploy workflow to build images, run the migration and smoke-test.
+    new CfnOutput(this, 'Origin', { value: this.alb.origin });
+    new CfnOutput(this, 'ClusterName', { value: this.cluster.clusterName });
+    new CfnOutput(this, 'MigrationTaskDefinition', { value: this.migration.taskDefinition.family });
+    new CfnOutput(this, 'MigrationSecurityGroup', {
+      value: this.migration.securityGroup.securityGroupId,
+    });
+    new CfnOutput(this, 'PrivateSubnets', {
+      value: this.network.vpc.privateSubnets.map((s) => s.subnetId).join(','),
+    });
   }
 }
