@@ -3,6 +3,12 @@ import { resolveEnv } from '../lib/config';
 import { SharedStack } from '../lib/stacks/shared-stack';
 import { EnvStack } from '../lib/stacks/env-stack';
 
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required when a domain is set.`);
+  return value;
+}
+
 const app = new App();
 new SharedStack(app, 'nest-next-shared');
 
@@ -12,5 +18,20 @@ const names = app.node.tryGetContext('env')
 
 for (const name of names) {
   const { config, stackName } = resolveEnv(name);
-  new EnvStack(app, stackName, { envName: name, config, stackName });
+  const suffix = name.toUpperCase().replace('-', '_');
+  const domainName = process.env[`DOMAIN_NAME_${suffix}`];
+  const domain = domainName
+    ? {
+        name: domainName,
+        hostedZoneId: requireEnv(`HOSTED_ZONE_ID_${suffix}`),
+        hostedZoneName: requireEnv(`HOSTED_ZONE_NAME_${suffix}`),
+      }
+    : undefined;
+  new EnvStack(app, stackName, {
+    envName: name,
+    config,
+    stackName,
+    domain,
+    imageTag: app.node.tryGetContext('imageTag'),
+  });
 }

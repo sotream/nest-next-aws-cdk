@@ -62,7 +62,6 @@ export class Cache extends Construct {
       authToken: props.authToken.secretValue.unsafeUnwrap(),
     });
     redis.applyRemovalPolicy(props.destroyOnDelete ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN);
-    redis.addDependency(subnetGroup);
 
     this.url = new sm.Secret(this, 'Url', {
       description: 'REDIS_URL',
