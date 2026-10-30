@@ -1,8 +1,11 @@
 import { App } from 'aws-cdk-lib';
 import { resolveEnv } from '../lib/config';
-import { EnvStack } from '../lib/env-stack';
+import { SharedStack } from '../lib/stacks/shared-stack';
+import { EnvStack } from '../lib/stacks/env-stack';
 
 const app = new App();
+new SharedStack(app, 'nest-next-shared');
+
 const names = app.node.tryGetContext('env')
   ? [String(app.node.tryGetContext('env'))]
   : ['dev', 'stage', 'prod'];
