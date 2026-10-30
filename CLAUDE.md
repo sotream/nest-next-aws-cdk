@@ -1,6 +1,6 @@
 # nest-next-aws-cdk
 
-AWS CDK (TypeScript) deployment of nest-next-starter with per-PR preview environments. The source of truth is `docs/spec.md`. If code and spec disagree, the code is wrong; if the spec is ambiguous or impossible, say so in the pull request instead of guessing.
+Read `agent-context.md` first (owner, working rules, current task). AWS CDK (TypeScript) deployment of nest-next-starter with per-PR preview environments. The source of truth is `docs/spec.md`. If code and spec disagree, the code is wrong; if the spec is ambiguous or impossible, say so in the pull request instead of guessing.
 
 ## Flow
 
