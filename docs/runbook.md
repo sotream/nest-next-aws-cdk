@@ -5,44 +5,8 @@ changes an account is **yours**: the agent rules in `CLAUDE.md` forbid `cdk depl
 
 ## Setup, once per account
 
-1. **Bootstrap CDK** in the account and region:
-
-   ```bash
-   pnpm exec cdk bootstrap aws://<account-id>/<region>
-   ```
-
-   The deploy roles assume the bootstrap roles named `cdk-hnb659fds-*`. If you bootstrap with another
-   qualifier, change `qualifier` in `lib/constructs/github-deploy-role.ts`.
-
-2. **Deploy the shared stack** (ECR, OIDC provider, roles). If the account already has a GitHub OIDC provider,
-   pass its ARN so a second one is not created:
-
-   ```bash
-   GITHUB_OIDC_PROVIDER_ARN=arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com \
-     pnpm exec cdk deploy nest-next-shared
-   ```
-
-   The outputs are the role ARNs for the next step.
-
-3. **GitHub repository variables** (Settings, Secrets and variables, Actions, Variables). There are no secrets:
-   authentication is OIDC.
-
-   | Variable                                                              | Scope                | Used for                                             |
-   | --------------------------------------------------------------------- | -------------------- | ---------------------------------------------------- |
-   | `AWS_PREVIEW_ROLE_ARN`                                                | repository           | Output `PreviewRoleArn`; without it previews are off |
-   | `STARTER_REF`                                                         | repository           | Full SHA of the starter commit previews build        |
-   | `AWS_REGION`                                                          | repository, optional | Defaults to `eu-central-1`                           |
-   | `DOMAIN_NAME_<ENV>`, `HOSTED_ZONE_ID_<ENV>`, `HOSTED_ZONE_NAME_<ENV>` | repository           | Public domain; `<ENV>` is `DEV`, `STAGE`, `PROD`     |
-   | `ALARM_EMAIL_<ENV>`                                                   | repository, optional | Alarm recipient (confirm the subscription email)     |
-   | `AWS_DEPLOY_ROLE_ARN`                                                 | GitHub Environment   | Output `DeployRoleArn<Env>` of that environment      |
-
-4. **GitHub Environments** `dev`, `stage`, `prod`. Add required reviewers to `stage` and `prod`. On **every**
-   Environment, including `dev`, restrict **Deployment branches** to `main`: the OIDC subject names the
-   Environment, not the branch, so without this a branch with edited workflow code could deploy with the role.
-5. **Branch protection** for `main`: require pull requests and the `check` and `secrets` checks, block force
-   pushes. The repository does not configure this.
-6. **Stage and prod need a domain**: without one they synthesise with a warning and run the API as
-   `APP_ENV=dev` over HTTP.
+See the step-by-step [AWS setup guide](aws-setup.md): CDK bootstrap, the shared stack with the GitHub OIDC
+trust and deploy roles, the GitHub variables and Environments, and the first deploy.
 
 ## Deploy an environment
 

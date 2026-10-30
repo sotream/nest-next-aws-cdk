@@ -8,6 +8,9 @@ It is the CDK counterpart of [nest-next-aws-terraform](https://github.com/sotrea
 same application, same shape of infrastructure, different tool. The application is deployed unmodified; this
 repository is only the infrastructure and the CI/CD around it.
 
+**New here? Start with the [step-by-step AWS setup guide](docs/aws-setup.md):** from an empty AWS account
+to a working deployment and working preview environments.
+
 It is a portfolio project that shows how I structure CDK: small single-purpose constructs, one composition
 stack, a thin app entry, tests on the synthesised template, cdk-nag as a gate, and a preview flow that
 creates, updates and destroys stacks by pull request. **Nothing here has been deployed to an AWS account**;
@@ -43,7 +46,7 @@ pnpm test             # 80 jest tests, including cdk-nag for every profile
 pnpm exec cdk synth -c env=dev --quiet    # also: stage, prod, pr-<number>
 ```
 
-Deploying is described in the [runbook](docs/runbook.md). It needs an AWS account that you bootstrap yourself;
+Deploying is described in the [AWS setup guide](docs/aws-setup.md) and the [runbook](docs/runbook.md). It needs an AWS account that you bootstrap yourself;
 the agent rules in [CLAUDE.md](CLAUDE.md) forbid `cdk deploy`.
 
 ## Configuration
@@ -103,4 +106,4 @@ the cost figures, and that alarms reach the SNS topic.
 - ADRs: [constructs and stacks](docs/adr/0001-constructs-and-stacks.md),
   [secrets](docs/adr/0002-secrets-handling.md), [preview lifecycle](docs/adr/0003-preview-lifecycle.md),
   [database TLS](docs/adr/0004-database-tls.md)
-- [Runbook](docs/runbook.md), [cost estimate](docs/cost-estimate.md)
+- [AWS setup guide](docs/aws-setup.md), [runbook](docs/runbook.md), [cost estimate](docs/cost-estimate.md)
