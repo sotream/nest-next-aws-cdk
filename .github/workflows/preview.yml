@@ -1,0 +1,115 @@
+name: preview
+
+# One stack per pull request: created and updated on push, destroyed on close.
+# Runs only for branches of this repository, never for forks, and only once AWS_PREVIEW_ROLE_ARN is set.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  PR: ${{ github.event.pull_request.number }}
+  STACK: nest-next-pr-${{ github.event.pull_request.number }}
+  ENV_NAME: pr-${{ github.event.pull_request.number }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+  AWS_DEFAULT_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+  GH_TOKEN: ${{ github.token }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+jobs:
+  deploy:
+    if: >-
+      github.event.action != 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && vars.AWS_PREVIEW_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    env:
+      STARTER_REF: ${{ vars.STARTER_REF }}
+    steps:
+      - name: Validate the starter ref
+        run: |
+          if ! [[ "$STARTER_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Repository variable STARTER_REF must be a full 40-character commit SHA of sotream/nest-next-starter."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PREVIEW_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          repository: sotream/nest-next-starter
+          ref: ${{ vars.STARTER_REF }}
+          path: starter
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - name: Roll out
+        id: rollout
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: scripts/rollout.sh "$STACK" "$ENV_NAME" starter
+
+      - name: Smoke test
+        run: scripts/smoke-test.sh "${{ steps.rollout.outputs.origin }}"
+
+      - name: Comment the preview URL
+        run: |
+          scripts/preview-comment.sh "$PR" "Preview for ${HEAD_SHA::7} of this pull request: ${{ steps.rollout.outputs.origin }}"
+
+      - name: Comment the failure
+        if: failure()
+        run: |
+          scripts/preview-comment.sh "$PR" "Preview deploy failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+  destroy:
+    if: >-
+      github.event.action == 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && vars.AWS_PREVIEW_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PREVIEW_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Destroy the preview stack
+        run: pnpm exec cdk destroy "$STACK" --force -c "env=$ENV_NAME"
+
+      - name: Comment
+        run: scripts/preview-comment.sh "$PR" "Preview destroyed."

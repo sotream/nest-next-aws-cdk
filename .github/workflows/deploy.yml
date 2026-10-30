@@ -76,17 +76,13 @@ jobs:
             echo "ALARM_EMAIL_$suffix=$ALARM_EMAIL"
           } >> "$GITHUB_ENV"
 
-      # Services keep the image they run now; on the first deployment that is none and they start empty.
       - name: Current image tag
-        run: |
-          current=$(scripts/current-image-tag.sh "$STACK" "$STACK-api")
-          echo "CURRENT=$current" >> "$GITHUB_ENV"
-          echo "Running now: ${current:-nothing}"
+        run: echo "CURRENT=$(scripts/current-image-tag.sh "$STACK" "$STACK-api")" >> "$GITHUB_ENV"
 
       - name: Diff
         run: |
           set -euo pipefail
-          pnpm exec cdk diff "$STACK" --no-color -c "imageTag=$CURRENT" -c "migrateImageTag=$CURRENT" > diff.txt 2>&1 || true
+          pnpm exec cdk diff "$STACK" --no-color -c "env=$ENVIRONMENT" -c "imageTag=$CURRENT" -c "migrateImageTag=$CURRENT" > diff.txt 2>&1 || true
           {
             echo '### cdk diff'
             echo '```'
@@ -95,14 +91,6 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           scripts/check-db-replacement.sh < diff.txt
 
-      # 1. Infrastructure. Services stay on the image they run now.
-      - name: Deploy infrastructure
-        run: |
-          pnpm exec cdk deploy "$STACK" --require-approval never --outputs-file outputs.json \
-            -c "imageTag=$CURRENT" -c "migrateImageTag=$CURRENT"
-          echo "ORIGIN=$(jq -r --arg s "$STACK" '.[$s].Origin' outputs.json)" >> "$GITHUB_ENV"
-
-      # 2. Build from the pinned starter commit. Tags are immutable, so an existing tag is reused.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -113,40 +101,12 @@ jobs:
       - uses: aws-actions/amazon-ecr-login@v2
         id: ecr
 
-      - name: Build and push images
+      # Infrastructure, images, migration, services: see scripts/rollout.sh.
+      - name: Roll out
+        id: rollout
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
-        run: |
-          set -euo pipefail
-          # The web image inlines the origin at build time and tags are immutable, so the tag includes a
-          # hash of the origin: the same commit under a new domain builds a new image.
-          tag="${STARTER_REF::12}-$(printf %s "$ORIGIN" | sha256sum | cut -c1-8)"
-          echo "TAG=$tag" >> "$GITHUB_ENV"
-          exists() { aws ecr describe-images --repository-name "$1" --image-ids "imageTag=$tag" >/dev/null 2>&1; }
-          if exists nest-next/api; then echo "api:$tag already in ECR"; else
-            docker build -f starter/apps/api/Dockerfile -t "$REGISTRY/nest-next/api:$tag" starter
-            docker push "$REGISTRY/nest-next/api:$tag"
-          fi
-          if exists nest-next/web; then echo "web:$tag already in ECR"; else
-            docker build -f starter/apps/web/Dockerfile --build-arg "NEXT_PUBLIC_API_URL=$ORIGIN" \
-              -t "$REGISTRY/nest-next/web:$tag" starter
-            docker push "$REGISTRY/nest-next/web:$tag"
-          fi
+        run: scripts/rollout.sh "$STACK" "$ENVIRONMENT" starter
 
-      # 3. Register the migration task for the new image, run it once and require a clean exit.
-      - name: Migrate
-        run: |
-          set -euo pipefail
-          pnpm exec cdk deploy "$STACK" --require-approval never --outputs-file outputs.json \
-            -c "imageTag=$CURRENT" -c "migrateImageTag=$TAG"
-          out() { jq -r --arg s "$STACK" --arg k "$1" '.[$s][$k]' outputs.json; }
-          scripts/run-migration.sh "$(out ClusterName)" "$(out MigrationTaskDefinition)" \
-            "$(out PrivateSubnets)" "$(out MigrationSecurityGroup)"
-
-      # 4. Roll the services. The deploy waits for a steady state; the circuit breaker rolls back a bad rollout.
-      - name: Roll out services
-        run: pnpm exec cdk deploy "$STACK" --require-approval never -c "imageTag=$TAG"
-
-      # 5. Smoke test through the public origin.
       - name: Smoke test
-        run: scripts/smoke-test.sh "$ORIGIN"
+        run: scripts/smoke-test.sh "${{ steps.rollout.outputs.origin }}"

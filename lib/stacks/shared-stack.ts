@@ -16,6 +16,7 @@ export interface SharedStackProps extends StackProps {
 export class SharedStack extends Stack {
   public readonly ecr: Ecr;
   public readonly deployRoles: Record<string, GitHubDeployRole> = {};
+  public readonly previewRole: GitHubDeployRole;
 
   constructor(scope: Construct, id: string, props: SharedStackProps) {
     super(scope, id, props);
@@ -35,10 +36,25 @@ export class SharedStack extends Stack {
     for (const envName of props.environments) {
       this.deployRoles[envName] = new GitHubDeployRole(this, `Deploy-${envName}`, {
         provider,
-        repository: props.githubRepository,
-        envName,
+        name: envName,
+        // Only a job running in this GitHub Environment can assume the role.
+        subjects: [`repo:${props.githubRepository}:environment:${envName}`],
+        stackPrefix: `nest-next-${envName}`,
         repositories: [this.ecr.api, this.ecr.web],
       });
     }
+
+    // Previews: pull request workflows deploy and destroy, the nightly job on main cleans up orphans.
+    this.previewRole = new GitHubDeployRole(this, 'Deploy-previews', {
+      provider,
+      name: 'previews',
+      subjects: [
+        `repo:${props.githubRepository}:pull_request`,
+        `repo:${props.githubRepository}:ref:refs/heads/main`,
+      ],
+      stackPrefix: 'nest-next-pr-*',
+      repositories: [this.ecr.api, this.ecr.web],
+      listStacks: true,
+    });
   }
 }

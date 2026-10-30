@@ -1,0 +1,49 @@
+name: preview-cleanup
+
+# Safety net against orphaned cost: destroys preview stacks whose pull request is closed or that are older
+# than seven days, in case the on-close workflow did not run or failed.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list what would be destroyed
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: preview-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: vars.AWS_PREVIEW_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+      GH_TOKEN: ${{ github.token }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PREVIEW_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - run: scripts/cleanup-previews.sh

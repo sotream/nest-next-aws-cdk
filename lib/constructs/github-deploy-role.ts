@@ -3,19 +3,23 @@ import { Construct } from 'constructs';
 
 export interface GitHubDeployRoleProps {
   provider: iam.IOpenIdConnectProvider;
-  /** `owner/name` of the repository whose workflow may assume the role. */
-  repository: string;
-  /** Environment name; matches the GitHub Environment and the `nest-next-<env>` stack and cluster. */
-  envName: string;
+  /** What the role is for, e.g. `dev` or `previews`. */
+  name: string;
+  /** OIDC subjects (`sub` claims) allowed to assume the role. */
+  subjects: string[];
+  /** Name prefix of the stacks, clusters and roles it may act on, e.g. `nest-next-dev` or `nest-next-pr-*`. */
+  stackPrefix: string;
+  /** Let the role list stacks, for the nightly clean-up that looks for orphaned previews. */
+  listStacks?: boolean;
   repositories: ecr.IRepository[];
   /** CDK bootstrap qualifier. */
   qualifier?: string;
 }
 
 /**
- * Role for the deploy workflow of one long-lived environment. The trust policy names the repository and the
- * GitHub Environment, so only a job running in that Environment can assume it. The role does not deploy
- * resources itself: it assumes the CDK bootstrap roles, pushes images and runs the migration task.
+ * Role for a deploy workflow. The trust policy names exact OIDC subjects, and every statement names the
+ * resources of one stack prefix. The role does not create resources itself: it assumes the CDK bootstrap
+ * roles, pushes images and runs the migration task.
  */
 export class GitHubDeployRole extends Construct {
   public readonly role: iam.Role;
@@ -24,7 +28,7 @@ export class GitHubDeployRole extends Construct {
     super(scope, id);
     const stack = Stack.of(this);
     const qualifier = props.qualifier ?? 'hnb659fds';
-    const prefix = `nest-next-${props.envName}`;
+    const prefix = props.stackPrefix;
     const arn = (service: string, resource: string, name: string, region?: string) =>
       stack.formatArn({
         service,
@@ -35,11 +39,11 @@ export class GitHubDeployRole extends Construct {
       });
 
     this.role = new iam.Role(this, 'Role', {
-      description: `GitHub Actions deploy role for ${props.envName}`,
+      description: `GitHub Actions deploy role for ${props.name}`,
       assumedBy: new iam.WebIdentityPrincipal(props.provider.openIdConnectProviderArn, {
         StringEquals: {
           'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-          'token.actions.githubusercontent.com:sub': `repo:${props.repository}:environment:${props.envName}`,
+          'token.actions.githubusercontent.com:sub': props.subjects,
         },
       }),
     });
@@ -83,7 +87,7 @@ export class GitHubDeployRole extends Construct {
       new iam.PolicyStatement({
         actions: ['ecs:RunTask'],
         resources: [arn('ecs', 'task-definition', `${prefix}-migrate:*`)],
-        conditions: { ArnEquals: { 'ecs:cluster': arn('ecs', 'cluster', prefix) } },
+        conditions: { ArnLike: { 'ecs:cluster': arn('ecs', 'cluster', prefix) } },
       }),
     );
     this.role.addToPolicy(
@@ -99,5 +103,12 @@ export class GitHubDeployRole extends Construct {
         conditions: { StringEquals: { 'iam:PassedToService': 'ecs-tasks.amazonaws.com' } },
       }),
     );
+
+    if (props.listStacks) {
+      // ListStacks has no resource-level permissions; it is read-only.
+      this.role.addToPolicy(
+        new iam.PolicyStatement({ actions: ['cloudformation:ListStacks'], resources: ['*'] }),
+      );
+    }
   }
 }
