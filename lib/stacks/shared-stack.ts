@@ -1,4 +1,4 @@
-import { Stack, StackProps, aws_iam as iam } from 'aws-cdk-lib';
+import { CfnOutput, Stack, StackProps, aws_iam as iam } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { Ecr } from '../constructs/ecr';
 import { GitHubDeployRole } from '../constructs/github-deploy-role';
@@ -56,5 +56,13 @@ export class SharedStack extends Stack {
       repositories: [this.ecr.api, this.ecr.web],
       listStacks: true,
     });
+
+    // Values for the GitHub variables and Environments (see docs/runbook.md).
+    for (const [envName, deployRole] of Object.entries(this.deployRoles)) {
+      new CfnOutput(this, `DeployRoleArn${envName[0].toUpperCase()}${envName.slice(1)}`, {
+        value: deployRole.role.roleArn,
+      });
+    }
+    new CfnOutput(this, 'PreviewRoleArn', { value: this.previewRole.role.roleArn });
   }
 }
